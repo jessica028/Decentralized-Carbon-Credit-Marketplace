@@ -3,8 +3,11 @@
 (define-constant err-not-found (err u101))
 (define-constant err-invalid-amount (err u102))
 (define-constant err-unauthorized (err u103))
+(define-constant err-escrow-not-found (err u104))
+(define-constant err-escrow-exists (err u105))
 
 (define-data-var credit-price uint u1000)
+(define-data-var escrow-nonce uint u0)
 (define-data-var total-credits uint u0)
 
 (define-map credits 
@@ -15,6 +18,11 @@
 (define-map credit-listings
     uint 
     {seller: principal, amount: uint, price: uint}
+)
+
+(define-map escrow-transactions
+    uint
+    {buyer: principal, seller: principal, amount: uint, price: uint, stx-amount: uint, active: bool}
 )
 
 (define-data-var listing-nonce uint u0)
@@ -93,6 +101,94 @@
 
 (define-read-only (get-credit-price)
     (ok (var-get credit-price))
+)
+
+(define-read-only (get-escrow (escrow-id uint))
+    (ok (map-get? escrow-transactions escrow-id))
+)
+
+(define-public (create-escrow (listing-id uint))
+    (let (
+        (listing (unwrap! (map-get? credit-listings listing-id) err-not-found))
+        (seller (get seller listing))
+        (amount (get amount listing))
+        (price (get price listing))
+        (stx-amount (* amount price))
+        (escrow-id (var-get escrow-nonce))
+    )
+        (asserts! (> amount u0) err-invalid-amount)
+        (asserts! (> price u0) err-invalid-amount)
+        (asserts! (is-none (map-get? escrow-transactions escrow-id)) err-escrow-exists)
+        (try! (stx-transfer? stx-amount tx-sender (as-contract tx-sender)))
+        (map-set escrow-transactions
+            escrow-id
+            {
+                buyer: tx-sender,
+                seller: seller,
+                amount: amount,
+                price: price,
+                stx-amount: stx-amount,
+                active: true
+            }
+        )
+        (var-set escrow-nonce (+ escrow-id u1))
+        (ok escrow-id)
+    )
+)
+
+(define-public (release-escrow (escrow-id uint))
+    (let (
+        (escrow (unwrap! (map-get? escrow-transactions escrow-id) err-escrow-not-found))
+        (buyer (get buyer escrow))
+        (seller (get seller escrow))
+        (amount (get amount escrow))
+        (stx-amount (get stx-amount escrow))
+        (active (get active escrow))
+    )
+        (asserts! active err-escrow-not-found)
+        (asserts! (or (is-eq tx-sender buyer) (is-eq tx-sender seller)) err-unauthorized)
+        (try! (transfer-credits seller buyer amount))
+        (try! (as-contract (stx-transfer? stx-amount tx-sender seller)))
+        (map-set escrow-transactions
+            escrow-id
+            {
+                buyer: buyer,
+                seller: seller,
+                amount: amount,
+                price: (get price escrow),
+                stx-amount: stx-amount,
+                active: false
+            }
+        )
+        (ok true)
+    )
+)
+
+(define-public (cancel-escrow (escrow-id uint))
+    (let (
+        (escrow (unwrap! (map-get? escrow-transactions escrow-id) err-escrow-not-found))
+        (buyer (get buyer escrow))
+        (seller (get seller escrow))
+        (amount (get amount escrow))
+        (stx-amount (get stx-amount escrow))
+        (active (get active escrow))
+    )
+        (asserts! active err-escrow-not-found)
+        (asserts! (or (is-eq tx-sender buyer) (is-eq tx-sender seller)) err-unauthorized)
+        (try! (as-contract (stx-transfer? stx-amount tx-sender buyer)))
+        (map-set escrow-transactions
+            escrow-id
+            {
+                buyer: buyer,
+                seller: seller,
+                amount: amount,
+                price: (get price escrow),
+                stx-amount: stx-amount,
+                active: false
+            }
+        )
+        (ok true)
+    )
 )
 
 (define-public (set-credit-price (new-price uint))
