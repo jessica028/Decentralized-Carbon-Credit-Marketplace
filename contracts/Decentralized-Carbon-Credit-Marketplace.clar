@@ -9,6 +9,8 @@
 (define-data-var credit-price uint u1000)
 (define-data-var escrow-nonce uint u0)
 (define-data-var total-credits uint u0)
+(define-data-var total-retired uint u0)
+(define-data-var retirement-nonce uint u0)
 
 (define-map credits 
     principal 
@@ -23,6 +25,11 @@
 (define-map escrow-transactions
     uint
     {buyer: principal, seller: principal, amount: uint, price: uint, stx-amount: uint, active: bool}
+)
+
+(define-map credit-retirements
+    uint
+    {owner: principal, amount: uint, retired-at: uint, reason: (string-ascii 256)}
 )
 
 (define-data-var listing-nonce uint u0)
@@ -107,6 +114,14 @@
     (ok (map-get? escrow-transactions escrow-id))
 )
 
+(define-read-only (get-retirement (retirement-id uint))
+    (ok (map-get? credit-retirements retirement-id))
+)
+
+(define-read-only (get-total-retired)
+    (ok (var-get total-retired))
+)
+
 (define-public (create-escrow (listing-id uint))
     (let (
         (listing (unwrap! (map-get? credit-listings listing-id) err-not-found))
@@ -188,6 +203,35 @@
             }
         )
         (ok true)
+    )
+)
+
+(define-public (retire-credits (amount uint) (reason (string-ascii 256)))
+    (let (
+        (owner-balance (unwrap! (get-balance tx-sender) err-not-found))
+        (retirement-id (var-get retirement-nonce))
+    )
+        (asserts! (> amount u0) err-invalid-amount)
+        (asserts! (>= owner-balance amount) err-invalid-amount)
+        (map-set credits
+            tx-sender
+            {
+                balance: (- owner-balance amount),
+                verified: true
+            }
+        )
+        (map-set credit-retirements
+            retirement-id
+            {
+                owner: tx-sender,
+                amount: amount,
+                retired-at: burn-block-height,
+                reason: reason
+            }
+        )
+        (var-set total-retired (+ (var-get total-retired) amount))
+        (var-set retirement-nonce (+ retirement-id u1))
+        (ok retirement-id)
     )
 )
 
