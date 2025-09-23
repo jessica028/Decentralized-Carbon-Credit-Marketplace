@@ -12,6 +12,7 @@
 (define-data-var total-retired uint u0)
 (define-data-var retirement-nonce uint u0)
 
+(define-data-var platform-fee-percent uint u5)
 (define-map credits 
     principal 
     {balance: uint, verified: bool}
@@ -87,8 +88,12 @@
         (amount (get amount listing))
         (price (get price listing))
         (total-cost (* amount price))
+        (fee (* total-cost (var-get platform-fee-percent)))
+        (fee-divided (/ fee u100))
+        (net-amount (- total-cost fee-divided))
     )
-        (asserts! (is-eq (stx-transfer? total-cost tx-sender seller) (ok true)) err-invalid-amount)
+        (asserts! (is-eq (stx-transfer? net-amount tx-sender seller) (ok true)) err-invalid-amount)
+        (asserts! (is-eq (stx-transfer? fee-divided tx-sender contract-owner) (ok true)) err-invalid-amount)
         (try! (transfer-credits seller tx-sender amount))
         (map-delete credit-listings listing-id)
         (ok true)
@@ -159,11 +164,15 @@
         (amount (get amount escrow))
         (stx-amount (get stx-amount escrow))
         (active (get active escrow))
+        (fee (* stx-amount (var-get platform-fee-percent)))
+        (fee-divided (/ fee u100))
+        (net-stx (- stx-amount fee-divided))
     )
         (asserts! active err-escrow-not-found)
         (asserts! (or (is-eq tx-sender buyer) (is-eq tx-sender seller)) err-unauthorized)
         (try! (transfer-credits seller buyer amount))
-        (try! (as-contract (stx-transfer? stx-amount tx-sender seller)))
+        (try! (as-contract (stx-transfer? net-stx tx-sender seller)))
+        (try! (as-contract (stx-transfer? fee-divided tx-sender contract-owner)))
         (map-set escrow-transactions
             escrow-id
             {
@@ -239,6 +248,14 @@
     (begin
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (var-set credit-price new-price)
+        (ok true)
+    )
+)
+
+(define-public (set-platform-fee (new-fee uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (var-set platform-fee-percent new-fee)
         (ok true)
     )
 )
