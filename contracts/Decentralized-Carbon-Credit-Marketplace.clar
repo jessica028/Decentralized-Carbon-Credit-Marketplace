@@ -260,29 +260,36 @@
     )
 )
 
+(define-public (transfer-credits-public (to principal) (amount uint))
+    (begin
+        (asserts! (> amount u0) err-invalid-amount)
+        (transfer-credits tx-sender to amount)
+    )
+)
+
 (define-private (transfer-credits (from principal) (to principal) (amount uint))
     (let (
         (from-balance (unwrap! (get-balance from) err-not-found))
     )
         (asserts! (>= from-balance amount) err-invalid-amount)
-        (map-set credits 
-            from 
+        (map-set credits
+            from
             {
                 balance: (- from-balance amount),
                 verified: true
             }
         )
         (match (map-get? credits to)
-            prev-balance 
-            (map-set credits 
-                to 
+            prev-balance
+            (map-set credits
+                to
                 {
                     balance: (+ (get balance prev-balance) amount),
                     verified: true
                 }
             )
-            (map-set credits 
-                to 
+            (map-set credits
+                to
                 {
                     balance: amount,
                     verified: true
